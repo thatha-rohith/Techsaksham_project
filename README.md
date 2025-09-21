@@ -57,8 +57,8 @@ This solution ensures the following:
 
 Feel free to reach out if you have any questions, suggestions, or would like to discuss this project further:
 
-- **Email**: rizvanabegumt@outlook.com
-- **LinkedIn**: www.linkedin.com/in/rizvanabegum
-- **GitHub**: https://github.com/RizvanaBegum
+- **Email**: thatharohith062@gmail.com
+- **LinkedIn**: https://www.linkedin.com/in/thatha-rohith/
+
 
 I'm always open to collaborating or discussing improvements on this project. Let's connect!
