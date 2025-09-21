@@ -1,0 +1,216 @@
+Mappings:
+  RegionMap:
+    us-east-1:
+      AMI: ami-0e449927258d45bc4
+    us-east-2:
+      AMI: ami-060a84cbcb5c14844
+    us-west-1:
+      AMI: ami-0ce45259f491c3d4f
+
+Resources:
+  vpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: Project-3-VPC
+  subnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref vpc
+      CidrBlock: 10.0.32.0/24
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: Project-3-Subnet
+  igw:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: name
+          Value: Project-3-IGW
+
+  igwattachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref vpc
+      InternetGatewayId: !Ref igw
+  routetable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref vpc
+      Tags:
+        - Key: Name
+          Value: Project-3-RouteTable
+  route:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref routetable
+      GatewayId: !Ref igw
+      DestinationCidrBlock: 0.0.0.0/0
+  routetableassosiation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref routetable
+      SubnetId: !Ref subnet
+  ec2secgroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allows SSH from all and allows all traffic within vpc
+      GroupName: Project-3 CF Security Group
+      VpcId: !Ref vpc
+      SecurityGroupIngress:
+        - IpProtocol: '-1'
+          CidrIp: 10.0.0.0/16
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - IpProtocol: '-1'
+          CidrIp: 10.0.0.0/16
+      Tags:
+        - Key: Name
+          Value: Project-3-cf-sec-grp
+  ec2:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !FindInMap 
+        - RegionMap
+        - !Ref 'AWS::Region'
+        - AMI
+      SubnetId: !Ref subnet
+      InstanceType: t2.micro
+      KeyName: hellokey
+      SecurityGroupIds:
+        - !Ref ec2secgroup
+      Tags:
+        - Key: Name
+          Value: P3-ec2
+      IamInstanceProfile: !Ref iamec2profile
+  iamrole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: allowing ec2 to access sns fully
+      RoleName: P3CFEC2hasfullSNS
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSNSFullAccess
+  iamec2profile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: Project3instanceprofile
+      Roles:
+        - !Ref iamrole
+
+  vpcendpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcEndpointType: Interface
+      ServiceName: com.amazonaws.us-east-1.sns
+      VpcId: !Ref vpc
+      SecurityGroupIds:
+        - !Ref ec2secgroup
+      SubnetIds:
+        - !Ref subnet
+      Tags:
+        - Key: Name
+          Value: Project-3-Interface-endpoint
+  sns2:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: Project3SNS2
+      Tags:
+        - Key: Name
+          Value: Project3SNS2
+      Subscription:
+        - Endpoint: hellothisislearner@gmail.com
+          Protocol: EMAIL
+
+  sns1:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: Project3SNS1
+      Tags:
+        - Key: Name
+          Value: Project3SNS1
+      Subscription:
+        - Endpoint: !GetAtt lambda.Arn
+          Protocol: lambda
+
+  lambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: Project3LambdaCF
+      Handler: index.lambda_handler
+      Runtime: python3.9
+      Timeout: '3'
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+          sns = boto3.client('sns')
+          from datetime import datetime
+          current_date = datetime.now().strftime("%d-%m-%Y")
+
+          TARGET_TOPIC_ARN = 'arn:aws:sns:us-east-1:762233767132:Project3SNS2'
+          def lambda_handler(event, context):
+              message = json.loads(event['Records'][0]['Sns']['Message'])
+              patient_name = message.get('patient_name', 'Unknown')
+              test_result = message.get('test_result', 'Not Available')
+              structured_message = f"""
+              Hospital Name: ABC Hospital
+              Date : {current_date}
+              Test Name: Fever Test
+              Patient Name: {patient_name}
+              Test Result  : {test_result}
+              """
+
+              response = sns.publish(
+              TopicArn=TARGET_TOPIC_ARN,
+              Message= structured_message,
+              Subject='Test Result Notification of ' + patient_name 
+              )
+              return message
+
+      Role: !GetAtt lambdaExecutionRole.Arn
+
+  lambdapermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref lambda
+      Principal: sns.amazonaws.com
+      SourceArn: !Ref sns1
+
+  lambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: allows lambda basic execution role and sns publish
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: lambdasnspublish
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sns:Publish
+                Resource: arn:aws:sns:us-east-1:762233767132:Project3SNS2
